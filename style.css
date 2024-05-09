@@ -1,0 +1,27 @@
+.dg .c .slider {
+    background: #886CD4;
+    cursor: ew-resize;
+    color: #89E2A0;
+}
+elemento {
+
+    user-select: none;
+    width: 245px;
+
+}
+.dg.main {
+
+}
+.dg.a {
+
+    margin-right: 15px;
+    overflow-x: hidden;
+    position: fixed;
+    bottom: 50px;
+    right: 1000px;
+
+}
+
+.c {
+    width: 70%;
+}

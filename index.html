@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+</head>
+<body>
+<!-- 📕 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r71/three.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+
+<script src="js/loaders/PLYLoader.js"></script>
+<script src="js/dat.gui.min.js"></script>
+
+<p style="position:fixed;">Move with key arrows, press p to pause, y Y to rotate, c y C to move camara</p>
+
+<script id="fragment_shader" type="x-shader/x-fragment">
+
+uniform vec3 color_especular;
+uniform vec3 color_difuso;
+uniform vec3 LightDirection_;
+uniform float roughnessValue; // 0 : smooth, 1: rough
+uniform float F0; // fresnel  incidencia
+uniform float kd;  // reflexion Kd
+varying vec3 v_normal;
+varying vec3 vpos;
+
+void main()
+{
+vec3 lightDirection = normalize(-LightDirection_);
+vec3 normal = normalize(v_normal);
+float NdotL = dot(normal, lightDirection);
+float ks = 0.0;
+
+if(NdotL > 0.0)
+{
+	vec3 eye = normalize(-vpos); // to eye
+	vec3 half_vector = normalize(lightDirection + eye);
+	float NdotH = max(dot(normal, half_vector), 0.0); 
+	float NdotV = max(dot(normal, eye), 0.0);
+	float VdotH = max(dot(eye, half_vector), 0.0);
+
+	float mSquared = roughnessValue * roughnessValue;
+	
+	// Blinn's model// geometric attenuation
+	float NH2 = 2.0 * NdotH;
+	float g1 = (NH2 * NdotV) / VdotH;
+	float g2 = (NH2 * NdotL) / VdotH;
+	float geometric= min(1.0, min(g1, g2));
+	
+	// Beckmann distribution// roughness (microfacet distribution function)
+	float r1 = 1.0 / ( 3.1415 * mSquared * pow(NdotH, 4.0));
+	float r2 = (NdotH * NdotH - 1.0) / (mSquared * NdotH * NdotH);
+	float roughness = r1 * exp(r2);
+	
+	// Fresnel// Schlick's approximation
+	float fresnel = F0+((1.0 - F0)*pow(1.0 - VdotH, 5.0));
+
+	ks = (fresnel * geometric* roughness) / (NdotV * NdotL * 3.14159265358979323846264);
+}
+
+vec3 color = NdotL * ((kd * color_difuso) + (color_especular * ks * (1.0 - kd)));
+gl_FragColor = vec4(color, 1.0);
+}
+
+</script>
+
+<script id="vertex_shader" type="x-shader/x-vertex">
+varying vec3 LightDir[2];
+varying vec3 v_normal;
+varying vec3 vpos;
+void main(){
+gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+// vertex normal
+v_normal = normalize(normalMatrix * normal);
+// vertex position
+vpos = vec3(modelViewMatrix * vec4(position, 1.0));
+}
+</script>
+
+<script>
+
+var container, camera, cameraTarget, scene, renderer;
+var mesh;
+var material, torrance;
+// 🌟 Init Clock
+var clock = new THREE.Clock();
+var rotationSpeed = 0;
+var positionSpeed = 0;
+var z_position_speed = 0;
+var camaraSpeed = 0;
+
+// Valores por defecto
+var effectController = {
+'rotationSpeed' : 0,
+'color_especular' : [255, 255, 0],
+'color_difuso' : [245, 57, 0],
+'Roughness': 0.46,
+'fresnel' : 2.6,
+"Kd" : 0.2
+};
+
+// 📣
+drawScene(); //(1)
+initGUI();  //(2)
+aminar(); //(3)
+
+// ✅
+//Camara
+// HTML
+//Scene
+// Variables Shaders
+function drawScene() {
+//HTML div
+container = document.createElement( 'div' );
+document.body.appendChild( container );
+
+// 🌟 INIT Camara
+camera = new THREE.PerspectiveCamera( 35, window.innerWidth / window.innerHeight, 1, 15 );
+camera.position.set( 3, 1, 3 );
+cameraTarget = new THREE.Vector3( 0, -0.25, 0 );
+// 🌟 INIT Scene
+scene = new THREE.Scene();
+
+// variables shaders
+// 📦
+torrance = {
+	LightDirection_: { type: "v3", value: new THREE.Vector3(0,-1,-1) },
+	color_especular: { type: "v3", value: new THREE.Vector3(0.0, 0.0, 0.0) },
+	color_difuso: { type: "v3", value: new THREE.Vector3(0.0, 0.0, 0.0) },
+	roughnessValue: { type: "f", value: 0.1 },
+	F0: { type: "f", value: 0.8 },
+	kd: { type: "f", value: 0.7 }
+};
+
+// También podriamos agregar un plano a la escena
+
+// PLY file
+//Carga del modelo 3D
+var loader = new THREE.PLYLoader();
+loader.addEventListener( 'load', function ( event ) {
+
+	var geometry = event.content;
+
+	//SHADERS
+	material = new THREE.ShaderMaterial( {
+		uniforms: torrance,
+		vertexShader: document.getElementById( 'vertex_shader' ).textContent,
+		fragmentShader: document.getElementById( 'fragment_shader' ).textContent
+	} );
+
+	geometry.computeFaceNormals();
+	geometry.computeVertexNormals();
+
+	// 🌟 INIT de la malla 3d, con los shaders
+	mesh = new THREE.Mesh( geometry, material );
+	//Posicion del objeto
+	// mesh.position.set( 0, -.7,0 );
+	mesh.position.set( 0, 0, 0 );
+	// mesh.rotation.set( 0, - Math.PI / 2, 0 );
+	mesh.rotation.set( - Math.PI / 2,0 , - 2*Math.PI );
+	// mesh.scale.set( 7, 7, 7 );
+	mesh.scale.set( 0.01, 0.01, 0.01 );
+
+	mesh.castShadow = true;
+	mesh.receiveShadow = true;
+
+	scene.add( mesh );
+
+} );
+
+loader.load( './models/Garuda and Vishnu.ply' );
+
+// renderer
+// 🌟 INIT RENDER
+renderer = new THREE.WebGLRenderer( { antialias: true } );
+renderer.setClearColor( 0x72645b );
+renderer.setPixelRatio( window.devicePixelRatio );
+renderer.setSize( window.innerWidth, window.innerHeight );
+renderer.setFaceCulling ( "back", "ccw" );
+
+renderer.shadowMapEnabled = true;
+renderer.shadowMapCullFace = THREE.CullFaceBack;
+
+container.appendChild( renderer.domElement );
+
+window.addEventListener( 'resize', onWindowResize, false );
+window.addEventListener("keydown",function(event){
+switch (event.key) {
+	case "ArrowRight": positionSpeed -= 0.1; break;
+	case "ArrowLeft": positionSpeed += 0.1; break;
+	case "p":
+	case "P":
+	rotationSpeed = 0; 
+	positionSpeed =0;
+	camaraSpeed = 0;
+	z_position_speed = 0;
+	break;
+	case "y": rotationSpeed += 0.1; break;
+	case "Y": rotationSpeed -= 0.1; break;
+	case "c": camaraSpeed += 0.1; break;
+	case "C": camaraSpeed -= 0.1; break;
+	case "z": z_position_speed += 0.1;break;
+	case "Z": z_position_speed -= 0.1; break;
+	default: break;
+}
+
+})
+
+}//End draw scene
+
+function guiChanged() {
+
+rotationSpeed = effectController.rotationSpeed;
+
+//bug in dat.gui - color returns hex value instead of rgb
+//agregando controladores de entrada
+function cutHex(h) {return (h.charAt(0)=="#") ? h.substring(1,7):h}
+
+if(typeof(effectController.color_especular) == "string"){
+	var temp = [0, 0, 0];
+	temp[0] = parseInt(((effectController.color_especular).substring(1,7)).substring(0,2),16);
+	temp[1] = parseInt(((effectController.color_especular).substring(1,7)).substring(2,4),16);
+	temp[2] = parseInt(((effectController.color_especular).substring(1,7)).substring(4,6),16);
+	torrance[ 'color_especular' ].value = new THREE.Vector3().fromArray( temp ).divideScalar( 255 );
+}
+else{
+	torrance[ 'color_especular' ].value = new THREE.Vector3().fromArray( effectController.color_especular ).divideScalar( 255 );
+}
+
+if(typeof(effectController.color_difuso) == "string"){
+	var temp = [0, 0, 0];
+	temp[0] = parseInt(((effectController.color_difuso).substring(1,7)).substring(0,2),16);
+	temp[1] = parseInt(((effectController.color_difuso).substring(1,7)).substring(2,4),16);
+	temp[2] = parseInt(((effectController.color_difuso).substring(1,7)).substring(4,6),16);
+	torrance[ 'color_difuso' ].value = new THREE.Vector3().fromArray( temp ).divideScalar( 255 );
+}
+else{
+	torrance[ 'color_difuso' ].value = new THREE.Vector3().fromArray( effectController.color_difuso ).divideScalar( 255 );
+}
+
+torrance[ 'roughnessValue' ].value = effectController.Roughness;
+torrance[ 'F0' ].value = effectController.fresnel;
+torrance[ 'kd' ].value = effectController.Kd;
+
+}
+
+// ✅
+function initGUI() {
+// 😉HTML
+var gui = new dat.GUI();
+//Los valores se modifican de acuerdo a la entra 
+gui.addColor( effectController , 'color_especular' ).onChange( guiChanged );
+gui.addColor( effectController , 'color_difuso' ).onChange( guiChanged );
+gui.add( effectController, 'Roughness', 0.0, 1.0, 0.01 ).onChange( guiChanged );
+gui.add( effectController, 'fresnel', 0.0, 5.0, 0.1 ).onChange( guiChanged );
+gui.add( effectController, 'Kd', 0.0, 1.0, 0.01 ).onChange( guiChanged );
+
+guiChanged();
+
+}
+
+function onWindowResize() {
+camera.aspect = window.innerWidth / window.innerHeight;
+camera.updateProjectionMatrix();
+
+renderer.setSize( window.innerWidth, window.innerHeight );
+}
+
+function aminar() { requestAnimationFrame( aminar ); render(); }
+
+function render() {
+var delta = clock.getDelta();
+
+mesh.rotation.z  += -delta * rotationSpeed;
+mesh.position.x  += -delta * positionSpeed;
+mesh.position.z  += -delta * z_position_speed;
+camera.position.z += -delta * camaraSpeed;
+
+camera.lookAt( cameraTarget );
+renderer.render( scene, camera );
+}
+
+
+
+</script>
+<link rel="stylesheet" href="./style.css" type="text/css">
+</body>
+</html>
